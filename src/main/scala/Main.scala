@@ -14,20 +14,13 @@ object Main extends App{
 
   val sc = spark.sparkContext
 
-  case class Person(name: String, age: Long)
-  val personSeq = Seq(Person("Matt",49),
-    Person("Ray", 38),
-    Person("Gill", 62),
-    Person("George", 28))
-  var personDF = sc.parallelize(personSeq).toDF()
-  personDF.filter(col("age") < 40).select(personDF("name")).show
-  //That last line is equivalent to
-  personDF.createOrReplaceTempView("person")
-  spark.sql("select name from person where age < 40").show
+  val df = spark.read.option("header",true).csv("./data/2008.csv.bz2")
 
-  // Add a new column to the DataFrame
-  personDF = personDF.withColumn("young", personDF("age") < 40)
-  val groupAge = personDF.groupBy("young")
-    .agg(avg(personDF("age")).as("average_age"))
-  groupAge.show
+  println(df.printSchema())
+
+  val dfRemoveColumns= df.drop("ArrTime", "ActualElapsedTime",
+    "AirTime", "TaxiIn", "Diverted", "CarrierDelay", "WeatherDelay", "NASDelay",
+    "SecurityDelay", "LateAircraftDelay")
+
+  println(dfRemoveColumns.show(5))
 }
