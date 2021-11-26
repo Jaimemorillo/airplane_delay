@@ -15,7 +15,10 @@
 .idea/**/usage.statistics.xml
 .idea/**/dictionaries
 .idea/**/shelf
-.idea/modules/
+.idea/modules/airplane_delay.iml
+.idea/modules/airplane_delay-build.iml
+
+.idea/libraries/sbt__org_scala_lang_scala_library_2_12_15_jar.xml
 
 # AWS User-specific
 .idea/**/aws.xml
