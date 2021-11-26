@@ -57,6 +57,6 @@ object Main extends App{
 
   //println(dfRemoveColumns.groupBy("Cancelled").count().show())
   //CancellationCode has a lot of empty values, caused by flights which were not cancelled.
-  //println(dfRemoveColumns.groupBy("CancellationCode").count().show())
+  println(dfRemoveColumns.groupBy("CancellationCode").count().show())
   //println(dfRemoveColumns.show(5))
 }
