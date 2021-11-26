@@ -3,13 +3,15 @@ import org.apache.spark.SparkContext
 import org.apache.spark.SparkConf
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.functions._
-import org.apache.spark.sql.types.{BooleanType, IntegerType, StringType, StructField, StructType}
+import org.apache.spark.sql.types.{IntegerType, StringType, StructField, StructType}
 
 object Main extends App{
   val spark = SparkSession.builder()
     .master("local[1]")
     .appName("Airlane Delay")
     .getOrCreate()
+
+  import spark.implicits._
 
   val sc = spark.sparkContext
 
@@ -45,7 +47,7 @@ object Main extends App{
     StructField("LateAircraftDelay",StringType,true),
   ))
 
-  val df = spark.read.option("header",true).option("delimiter", ",").schema(schema).csv("D:/UPM/Big Data/Assignment Spark/dataverse_files/2008.csv.bz2")
+  val df = spark.read.option("header",true).option("delimiter", ",").schema(schema).csv("./data/2008.csv.bz2")
 
   //println(df.printSchema())
 
@@ -57,6 +59,4 @@ object Main extends App{
   //CancellationCode has a lot of empty values, caused by flights which were not cancelled.
   //println(dfRemoveColumns.groupBy("CancellationCode").count().show())
   //println(dfRemoveColumns.show(5))
-
-
 }
