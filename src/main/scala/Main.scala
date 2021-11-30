@@ -4,9 +4,10 @@ import org.apache.spark.sql.expressions.Window
 import org.apache.spark.sql.{Column, DataFrame, SparkSession}
 import org.apache.spark.sql.functions._
 import org.apache.spark.sql.types.{DoubleType, IntegerType, LongType, StringType, StructField, StructType}
-import org.apache.spark.ml.regression.LinearRegression
+import org.apache.spark.ml.regression.{LinearRegression, RandomForestRegressor}
 import org.apache.spark.ml.feature.VectorAssembler
 import org.apache.spark.ml.evaluation.RegressionEvaluator
+import org.apache.spark.ml.feature.Imputer
 
 import scala.math.Pi
 
@@ -67,12 +68,9 @@ object Main extends App{
   val dfFilterCancelled = dfFilterArrDelay.filter($"Cancelled" === 0)
     .drop("Cancelled")
 
-  //Fill null values TaxiOut (it should be done after train)
-  val meanTaxiOUt = dfFilterArrDelay.select(mean("TaxiOut")).first().getDouble(0)
-  val dfFilledTaxiOut = dfFilterCancelled.na.fill(meanTaxiOUt,Array("TaxiOut"))
-
   //Filter out null values
-  val dfNullDropped = dfFilledTaxiOut.na.drop()
+  val dfNullDropped = dfFilterCancelled.na.drop("any", Seq("Month","DayofMonth","DayofWeek","DepTime","CRSDepTime",
+    "CRSArrTime", "UniqueCarrier","FlightNum","TailNum","CRSElapsedTime","ArrDelay","DepDelay","Origin","Dest","Distance"))
 
   //Merge full date (Leap-year¿?)
   val dfDate = dfNullDropped
@@ -156,12 +154,18 @@ object Main extends App{
   val Array(trainingIni, testIni, validationIni) = dfDateEncoded.randomSplit(Array(0.6,0.2,0.2),seed=1)
 
   // Apply encoding function to train and join the result with training, test and val
-  val uniqueCarrierEncoding = meanTargetEncoding(trainingIni, "UniqueCarrier")
-  val dayofWeekEncoding = meanTargetEncoding(trainingIni, "DayofWeek")
-  val flightNumEncoding = meanTargetEncoding(trainingIni, "FlightNum")
-  val tailNumEncoding = meanTargetEncoding(trainingIni, "TailNum")
-  val originEncoding = meanTargetEncoding(trainingIni, "Origin")
-  val destEncoding = meanTargetEncoding(trainingIni, "Dest")
+  val uniqueCarrierEncoding = meanTargetEncoding(trainingIni, "UniqueCarrier").cache()
+  uniqueCarrierEncoding.show(false)
+  val dayofWeekEncoding = meanTargetEncoding(trainingIni, "DayofWeek").cache()
+  dayofWeekEncoding.show(false)
+  val flightNumEncoding = meanTargetEncoding(trainingIni, "FlightNum").cache()
+  flightNumEncoding.show(false)
+  val tailNumEncoding = meanTargetEncoding(trainingIni, "TailNum").cache()
+  tailNumEncoding.show(false)
+  val originEncoding = meanTargetEncoding(trainingIni, "Origin").cache()
+  originEncoding.show(false)
+  val destEncoding = meanTargetEncoding(trainingIni, "Dest").cache()
+  destEncoding.show(false)
 
   // Join with each sample
   val dfTraining = trainingIni.join(uniqueCarrierEncoding, Seq("UniqueCarrier"), "left")
@@ -188,41 +192,60 @@ object Main extends App{
     .join(destEncoding, Seq("Dest"), "left")
     .drop("UniqueCarrier", "DayofWeek", "FlightNum", "TailNum", "Origin", "Dest")
 
-  println(dfValidation.show)
+  //Fill null values
+  val colsNames = Array("TaxiOut", "UniqueCarrierEncoded", "DayofWeekEncoded", "FlightNumEncoded",
+    "TailNumEncoded", "OriginEncoded", "DestEncoded")
+  val imputer = new Imputer()
+    .setInputCols(colsNames)
+    .setOutputCols(colsNames.map(c => s"${c}Imputed"))
+    .setStrategy("median")
+  val imputerModel = imputer.fit(dfTraining)
+
+  val trainingInputed = imputerModel.transform(dfTraining).drop("TaxiOut", "UniqueCarrierEncoded",
+    "DayofWeekEncoded", "FlightNumEncoded", "TailNumEncoded", "OriginEncoded", "DestEncoded").cache()
+  trainingInputed.show(false)
+  val testInputed = imputerModel.transform(dfTest).drop("TaxiOut", "UniqueCarrierEncoded",
+    "DayofWeekEncoded", "FlightNumEncoded", "TailNumEncoded", "OriginEncoded", "DestEncoded").cache()
+  testInputed.show(false)
+  val validationInputed = imputerModel.transform(dfValidation).drop("TaxiOut", "UniqueCarrierEncoded",
+    "DayofWeekEncoded", "FlightNumEncoded", "TailNumEncoded", "OriginEncoded", "DestEncoded").cache()
+  validationInputed.show(false)
+
+  //Apply a normalizer ?¿¿¿¿
 
   /////////////////////////////////////////////////
   ////////// MODEL ////////////////////////////////
   /////////////////////////////////////////////////
 
   val assembler = new VectorAssembler()
-    .setInputCols(Array("CRSElapsedTime","DepDelay", "Distance", "TaxiOut", "xCRSDepTime",
+    .setInputCols(Array("CRSElapsedTime","DepDelay", "Distance", "TaxiOutImputed", "xCRSDepTime",
       "yCRSDepTime", "xCRSArrTime", "yCRSArrTime", "xDepTime", "yDepTime", "xDayofYear", "yDayofYear",
-      "UniqueCarrierEncoded", "DayofWeekEncoded", "FlightNumEncoded", "TailNumEncoded", "OriginEncoded",
-      "DestEncoded"))
+      "UniqueCarrierEncodedImputed", "DayofWeekEncodedImputed", "FlightNumEncodedImputed", "TailNumEncodedImputed",
+      "OriginEncodedImputed", "DestEncodedImputed"))
     .setOutputCol("features")
 
-  //Apply a normalizer ?¿¿¿¿
-
-  val training = assembler.transform(dfTraining)
-  val test = assembler.transform(dfTest)
-  val validation = assembler.transform(dfValidation)
+  val training = assembler.transform(trainingInputed)
+  val test = assembler.transform(testInputed)
+  val validation = assembler.transform(validationInputed)
 
   //Linear Regression
-  val lr = new LinearRegression()
+  val lr = new RandomForestRegressor()
 
   // Fit the model
   val lrModel = lr.fit(training)
 
   // Print the coefficients and intercept for logistic regression
-  println(s"Coefficients: ${lrModel.coefficients} Intercept: ${lrModel.intercept}")
+  //println(s"Coefficients: ${lrModel.coefficients} Intercept: ${lrModel.intercept}")
 
-  val Predictions = lrModel.transform(test)
+  val predictions = lrModel.transform(test)
 
   val evaluator = new RegressionEvaluator()
     .setLabelCol("label")
     .setPredictionCol("prediction")
     .setMetricName("mse")
-  val accuracy = evaluator.evaluate(Predictions)
-  print(s"Test MSE: ${accuracy}")
+
+  println("Evaluating model")
+  val accuracy = evaluator.evaluate(predictions)
+  println(s"Test MSE: ${accuracy}")
 
 }
