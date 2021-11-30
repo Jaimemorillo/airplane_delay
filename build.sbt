@@ -9,3 +9,4 @@ idePackagePrefix := Some("es.upm.airplane")
 libraryDependencies += "org.apache.spark" %% "spark-core" % "3.2.0"
 // https://mvnrepository.com/artifact/org.apache.spark/spark-sql
 libraryDependencies += "org.apache.spark" %% "spark-sql" % "3.2.0" % "provided"
+libraryDependencies += "com.github.nscala-time" %% "nscala-time" % "2.30.0"

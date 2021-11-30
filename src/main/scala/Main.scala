@@ -1,9 +1,9 @@
 package es.upm.airplane
-import org.apache.spark.SparkContext
-import org.apache.spark.SparkConf
+import com.github.nscala_time.time.Imports._
 import org.apache.spark.sql.{DataFrame, SparkSession}
 import org.apache.spark.sql.functions._
-import org.apache.spark.sql.types.{IntegerType, StringType, StructField, StructType}
+import org.apache.spark.sql.types.{IntegerType, LongType, StringType, StructField, StructType}
+import scala.math.Pi
 
 object Main extends App{
   val spark = SparkSession.builder()
@@ -17,14 +17,14 @@ object Main extends App{
 
   // Create schema and read csv
   val schema = StructType(Array(
-    StructField("Year",IntegerType,true),
-    StructField("Month",IntegerType,true),
-    StructField("DayofMonth",IntegerType,true),
+    StructField("Year",StringType,true),
+    StructField("Month",StringType,true),
+    StructField("DayofMonth",StringType,true),
     StructField("DayofWeek", IntegerType,true),
-    StructField("Deptime",IntegerType,true),
-    StructField("CRSDepTime",IntegerType,true),
+    StructField("Deptime",StringType,true),
+    StructField("CRSDepTime",StringType,true),
     StructField("ArrTime",StringType,true),
-    StructField("CRSArrTime",IntegerType,true),
+    StructField("CRSArrTime",StringType,true),
     StructField("UniqueCarrier",StringType,true),
     StructField("FlightNum",IntegerType,true),
     StructField("TailNum",StringType,true),
@@ -71,24 +71,43 @@ object Main extends App{
     .withColumn("DayofYear", date_format($"Date", "D"))
     .drop("DayofMonth", "Month", "Year", "DateString")
 
-  //Leap-year¿?
-  println(dfDate.where($"Date"==="2008-02-29").show())
-  //println(dfDate.select(max("Date"),max("DayofYear")).show())
+  //Complete times
+  val dfTimes = dfDate
+    .withColumn("Deptime", lpad($"Deptime", 4, "0"))
+    .withColumn("CRSDepTime", lpad($"CRSDepTime", 4, "0"))
+    .withColumn("CRSArrTime", lpad($"CRSArrTime", 4, "0"))
 
-  //Separate times
-  /*def sepTimes(dfIni: DataFrame, columnName:String): DataFrame = {
-    val dfOut = dfIni.withColumn(columnName + "Hour", col(columnName)/100)
-      .withColumn(columnName + "Hour", col(columnName)%100)
-    return dfOut
-  }*/
+  //Leap-year¿?
+  //println(dfTimes.show(30))
+  //println(dfDate.select(max("Date"),max("DayofYear")).show())
 
   //Cyclical features encoding
   def cyclicalEncodingTime (dfIni: DataFrame, columnName:String) : DataFrame = {
     // Assign 0 to 00:00 until 1439 to 23:59 (= 24 hours x 60 minutes)
-    //2 * math.pi * df["x"] / 1439
-    val dfOut = dfIni.withColumn("x", col(columnName))
+    // Create table with encoding
+    val ini = DateTime.now().hour(0).minute(0).second(0)
+    val values = (0 until 1440).map(ini.plusMinutes(_)).toList
+    val hourAndMinutes = values.map(x=>(x.getHourOfDay().toString, x.getMinuteOfHour().toString))
+    val columns = Seq("Hour","Min")
+    val dfCyclical = hourAndMinutes.toDF(columns:_*)
+      .withColumn("Time",
+        concat(lpad($"Hour", 2, "0"),
+          lpad($"Min", 2, "0")))
+      .drop("Hour", "Min")
+      .withColumn("id", monotonically_increasing_id())
+      .withColumn("idNorm",
+        round(lit(2)*lit(Pi)*$"id"/lit(1439),6))
+      .withColumn("x" + columnName, round(cos($"idNorm"),6))
+      .withColumn("y" + columnName, round(sin($"idNorm"),6))
+      .drop("id", "idNorm")
+
+    val dfOut = dfIni.join(dfCyclical, dfIni(columnName)===dfCyclical("Time"), "inner")
+      .drop("Time")
     return dfOut
   }
+
+  val dfTimeEncoded = cyclicalEncodingTime(dfTimes, "Deptime")
+  println(dfTimeEncoded.where($"xDeptime".isNull).show(50))
 
   def cyclicalEncodingDate(dfIni: DataFrame, columnName:String) : DataFrame = {
     val dfOut = dfIni.withColumn("x", col(columnName))
