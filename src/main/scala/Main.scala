@@ -48,64 +48,13 @@ object Main extends App{
     StructField("SecurityDelay",StringType,true),
     StructField("LateAircraftDelay",StringType,true),
   ))
-  val path = List("D:/UPM/Big Data/Assignment Spark/dataverse_files/1987.csv.bz2",
-                  "D:/UPM/Big Data/Assignment Spark/dataverse_files/1988.csv.bz2",
-                  "D:/UPM/Big Data/Assignment Spark/dataverse_files/1989.csv.bz2",
-                  "D:/UPM/Big Data/Assignment Spark/dataverse_files/1990.csv.bz2",
-                  "D:/UPM/Big Data/Assignment Spark/dataverse_files/1991.csv.bz2",
-                  "D:/UPM/Big Data/Assignment Spark/dataverse_files/1992.csv.bz2",
-                  "D:/UPM/Big Data/Assignment Spark/dataverse_files/1993.csv.bz2",
-                  "D:/UPM/Big Data/Assignment Spark/dataverse_files/1994.csv.bz2",
-                  "D:/UPM/Big Data/Assignment Spark/dataverse_files/1995.csv.bz2",
-                  "D:/UPM/Big Data/Assignment Spark/dataverse_files/1996.csv.bz2",
-                  "D:/UPM/Big Data/Assignment Spark/dataverse_files/1997.csv.bz2",
-                  "D:/UPM/Big Data/Assignment Spark/dataverse_files/1998.csv.bz2",
-                  "D:/UPM/Big Data/Assignment Spark/dataverse_files/1999.csv.bz2",
-                  "D:/UPM/Big Data/Assignment Spark/dataverse_files/2000.csv.bz2",
-                  "D:/UPM/Big Data/Assignment Spark/dataverse_files/2001.csv.bz2",
-                  "D:/UPM/Big Data/Assignment Spark/dataverse_files/2002.csv.bz2",
-                  "D:/UPM/Big Data/Assignment Spark/dataverse_files/2003.csv.bz2",
-                  "D:/UPM/Big Data/Assignment Spark/dataverse_files/2004.csv.bz2",
-                  "D:/UPM/Big Data/Assignment Spark/dataverse_files/2005.csv.bz2",
-                  "D:/UPM/Big Data/Assignment Spark/dataverse_files/2006.csv.bz2",
-                  "D:/UPM/Big Data/Assignment Spark/dataverse_files/2007.csv.bz2",
-                  "D:/UPM/Big Data/Assignment Spark/dataverse_files/2008.csv.bz2"
-  )
 
-  val df = spark.read.option("header",true).option("delimiter", ",").schema(schema).csv("D:/UPM/Big Data/Assignment Spark/dataverse_files/2008.csv.bz2")
-
-/*
-  val testdf = spark.read.option("header",true).option("delimiter", ",").schema(schema).csv(path: _*)
-
-  val dfTestRemoveColumns= testdf.drop( "ArrTime","ActualElapsedTime",
-    "AirTime", "TaxiIn", "Diverted", "CarrierDelay", "WeatherDelay", "NASDelay",
-    "SecurityDelay", "LateAircraftDelay", "CancellationCode")
-
-  //Filter out not arriving flights
-  val dfTestFilterArrDelay = dfTestRemoveColumns.filter($"ArrDelay".isNotNull)
-
-  //Filter out cancelled flights
-  val dfTestFilterCancelled = dfTestFilterArrDelay.filter($"Cancelled" === 0)
-    .drop("Cancelled")
-
-
-
-  //def countCols(columns:Array[String]):Array[Column]={
-  //  columns.map(c=>{
-  //    count(when(col(c).isNull,c)).alias(c)
-  //  })
-  //}
-  //println(dfTestFilterCancelled.select(countCols(dfTestFilterCancelled.columns):_*).show())
-  //println(dfTestFilterCancelled.filter($"TaxiOUt" === 0).show())
-  //println(testdf.count())
-
- */
+  val df = spark.read.option("header",true).option("delimiter", ",").schema(schema).csv("./data/2008.csv.bz2")
 
   // Remove forbidden columns and not useful ones
   val dfRemoveColumns= df.drop( "ArrTime","ActualElapsedTime",
     "AirTime", "TaxiIn", "Diverted", "CarrierDelay", "WeatherDelay", "NASDelay",
-    "SecurityDelay", "LateAircraftDelay", "CancellationCode")
-
+    "SecurityDelay", "LateAircraftDelay", "CancellationCode", "Year")
 
   //Filter out not arriving flights
   val dfFilterArrDelay = dfRemoveColumns.filter($"ArrDelay".isNotNull)
@@ -114,22 +63,24 @@ object Main extends App{
   val dfFilterCancelled = dfFilterArrDelay.filter($"Cancelled" === 0)
     .drop("Cancelled")
 
-  val MeanTaxiOUt = dfFilterArrDelay.select(mean("TaxiOut")).first().getDouble(0)
-
   //Fill null values TaxiOut
-  val dfFilledTaxiOut = dfFilterCancelled.na.fill(MeanTaxiOUt,Array("TaxiOut"))
+  val meanTaxiOUt = dfFilterArrDelay.select(mean("TaxiOut")).first().getDouble(0)
+  val dfFilledTaxiOut = dfFilterCancelled.na.fill(meanTaxiOUt,Array("TaxiOut"))
 
   //Filter out null values
- val dfNullDropped = dfFilledTaxiOut.na.drop()
+  val dfNullDropped = dfFilledTaxiOut.na.drop()
 
-  //Merge full date
+  //Merge full date (Leap-year¿?)
   val dfDate = dfNullDropped
+    .withColumn("DayofMonth",
+      when($"DayofMonth"===29 && $"Month"===2, 28)
+        .otherwise($"DayofMonth"))
     .withColumn("DateString",
     concat(lpad($"DayofMonth", 2, "0"),
       lit("-"),
       lpad($"Month", 2, "0"),
       lit("-"),
-      $"Year"))
+      lit("2002")))
     .withColumn("Date", to_date($"DateString", "dd-MM-yyyy"))
     .withColumn("DayofYear", date_format($"Date", "D"))
     .drop("DayofMonth", "Month", "Year", "DateString")
@@ -139,10 +90,6 @@ object Main extends App{
     .withColumn("DepTime", lpad($"DepTime", 4, "0"))
     .withColumn("CRSDepTime", lpad($"CRSDepTime", 4, "0"))
     .withColumn("CRSArrTime", lpad($"CRSArrTime", 4, "0"))
-
-  //Leap-year¿?
-  //println(dfTimes.show(30))
-  //println(dfDate.select(max("Date"),max("DayofYear")).show())
 
   //Cyclical features encoding
   def cyclicalEncodingTime (dfIni: DataFrame, columnName:String) : DataFrame = {
@@ -170,14 +117,23 @@ object Main extends App{
   }
 
   val dfCRSDepTimeEncoded = cyclicalEncodingTime(dfTimes, "CRSDepTime")
-  //val dfCRSArrTimeEncoded = cyclicalEncodingTime(dfCRSDepTimeEncoded, "CRSArrTime")
+  val dfCRSArrTimeEncoded = cyclicalEncodingTime(dfCRSDepTimeEncoded, "CRSArrTime")
   //val dfDepTimeEncoded = cyclicalEncodingTime(dfCRSArrTimeEncoded, "DepTime")
 
-  println(dfCRSDepTimeEncoded.show(50))
-
   def cyclicalEncodingDate(dfIni: DataFrame, columnName:String) : DataFrame = {
-    val dfOut = dfIni.withColumn("x", col(columnName))
+    val dfCyclical = (0 until 366).toList.toDF("Days")
+      .withColumn("idNorm",
+        round(lit(2)*lit(Pi)*$"Days"/lit(365),6))
+      .withColumn("x" + columnName, round(cos($"idNorm"),6))
+      .withColumn("y" + columnName, round(sin($"idNorm"),6))
+      .drop("idNorm")
+
+    val dfOut = dfIni.join(dfCyclical, dfIni(columnName)===dfCyclical("Days"), "inner")
+      .drop("Days")
     return dfOut
   }
+
+  val dfDateEncoded = cyclicalEncodingDate(dfCRSArrTimeEncoded, "DayofYear")
+  //println(dfDateEncoded.show)
 
 }
