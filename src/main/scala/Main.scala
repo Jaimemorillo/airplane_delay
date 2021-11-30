@@ -1,8 +1,9 @@
 package es.upm.airplane
 import com.github.nscala_time.time.Imports._
-import org.apache.spark.sql.{DataFrame, SparkSession}
+import org.apache.spark.sql.{Column, DataFrame, SparkSession}
 import org.apache.spark.sql.functions._
-import org.apache.spark.sql.types.{IntegerType, LongType, StringType, StructField, StructType}
+import org.apache.spark.sql.types.{DoubleType, IntegerType, LongType, StringType, StructField, StructType}
+
 import scala.math.Pi
 
 object Main extends App{
@@ -37,7 +38,7 @@ object Main extends App{
     StructField("Dest",StringType,true),
     StructField("Distance",IntegerType,true),
     StructField("TaxiIn",IntegerType,true),
-    StructField("TaxiOUt",IntegerType,true),
+    StructField("TaxiOut",DoubleType,true),
     StructField("Cancelled",IntegerType,true),
     StructField("CancellationCode",StringType,true),
     StructField("Diverted",StringType,true),
@@ -47,20 +48,82 @@ object Main extends App{
     StructField("SecurityDelay",StringType,true),
     StructField("LateAircraftDelay",StringType,true),
   ))
+  val path = List("D:/UPM/Big Data/Assignment Spark/dataverse_files/1987.csv.bz2",
+                  "D:/UPM/Big Data/Assignment Spark/dataverse_files/1988.csv.bz2",
+                  "D:/UPM/Big Data/Assignment Spark/dataverse_files/1989.csv.bz2",
+                  "D:/UPM/Big Data/Assignment Spark/dataverse_files/1990.csv.bz2",
+                  "D:/UPM/Big Data/Assignment Spark/dataverse_files/1991.csv.bz2",
+                  "D:/UPM/Big Data/Assignment Spark/dataverse_files/1992.csv.bz2",
+                  "D:/UPM/Big Data/Assignment Spark/dataverse_files/1993.csv.bz2",
+                  "D:/UPM/Big Data/Assignment Spark/dataverse_files/1994.csv.bz2",
+                  "D:/UPM/Big Data/Assignment Spark/dataverse_files/1995.csv.bz2",
+                  "D:/UPM/Big Data/Assignment Spark/dataverse_files/1996.csv.bz2",
+                  "D:/UPM/Big Data/Assignment Spark/dataverse_files/1997.csv.bz2",
+                  "D:/UPM/Big Data/Assignment Spark/dataverse_files/1998.csv.bz2",
+                  "D:/UPM/Big Data/Assignment Spark/dataverse_files/1999.csv.bz2",
+                  "D:/UPM/Big Data/Assignment Spark/dataverse_files/2000.csv.bz2",
+                  "D:/UPM/Big Data/Assignment Spark/dataverse_files/2001.csv.bz2",
+                  "D:/UPM/Big Data/Assignment Spark/dataverse_files/2002.csv.bz2",
+                  "D:/UPM/Big Data/Assignment Spark/dataverse_files/2003.csv.bz2",
+                  "D:/UPM/Big Data/Assignment Spark/dataverse_files/2004.csv.bz2",
+                  "D:/UPM/Big Data/Assignment Spark/dataverse_files/2005.csv.bz2",
+                  "D:/UPM/Big Data/Assignment Spark/dataverse_files/2006.csv.bz2",
+                  "D:/UPM/Big Data/Assignment Spark/dataverse_files/2007.csv.bz2",
+                  "D:/UPM/Big Data/Assignment Spark/dataverse_files/2008.csv.bz2"
+  )
 
-  val df = spark.read.option("header",true).option("delimiter", ",").schema(schema).csv("./data/2008.csv.bz2")
+  val df = spark.read.option("header",true).option("delimiter", ",").schema(schema).csv("D:/UPM/Big Data/Assignment Spark/dataverse_files/2008.csv.bz2")
 
-  // Remove forbidden columns and not useful ones
-  val dfRemoveColumns= df.drop("ArrTime", "ActualElapsedTime",
+/*
+  val testdf = spark.read.option("header",true).option("delimiter", ",").schema(schema).csv(path: _*)
+
+  val dfTestRemoveColumns= testdf.drop( "ArrTime","ActualElapsedTime",
     "AirTime", "TaxiIn", "Diverted", "CarrierDelay", "WeatherDelay", "NASDelay",
     "SecurityDelay", "LateAircraftDelay", "CancellationCode")
 
+  //Filter out not arriving flights
+  val dfTestFilterArrDelay = dfTestRemoveColumns.filter($"ArrDelay".isNotNull)
+
   //Filter out cancelled flights
-  val dfFilterCancelled = dfRemoveColumns.filter($"Cancelled" === 0)
+  val dfTestFilterCancelled = dfTestFilterArrDelay.filter($"Cancelled" === 0)
     .drop("Cancelled")
 
+
+
+  //def countCols(columns:Array[String]):Array[Column]={
+  //  columns.map(c=>{
+  //    count(when(col(c).isNull,c)).alias(c)
+  //  })
+  //}
+  //println(dfTestFilterCancelled.select(countCols(dfTestFilterCancelled.columns):_*).show())
+  //println(dfTestFilterCancelled.filter($"TaxiOUt" === 0).show())
+  //println(testdf.count())
+
+ */
+
+  // Remove forbidden columns and not useful ones
+  val dfRemoveColumns= df.drop( "ArrTime","ActualElapsedTime",
+    "AirTime", "TaxiIn", "Diverted", "CarrierDelay", "WeatherDelay", "NASDelay",
+    "SecurityDelay", "LateAircraftDelay", "CancellationCode")
+
+
+  //Filter out not arriving flights
+  val dfFilterArrDelay = dfRemoveColumns.filter($"ArrDelay".isNotNull)
+
+  //Filter out cancelled flights
+  val dfFilterCancelled = dfFilterArrDelay.filter($"Cancelled" === 0)
+    .drop("Cancelled")
+
+  val MeanTaxiOUt = dfFilterArrDelay.select(mean("TaxiOut")).first().getDouble(0)
+
+  //Fill null values TaxiOut
+  val dfFilledTaxiOut = dfFilterCancelled.na.fill(MeanTaxiOUt,Array("TaxiOut"))
+
+  //Filter out null values
+ val dfNullDropped = dfFilledTaxiOut.na.drop()
+
   //Merge full date
-  val dfDate = dfFilterCancelled
+  val dfDate = dfNullDropped
     .withColumn("DateString",
     concat(lpad($"DayofMonth", 2, "0"),
       lit("-"),
