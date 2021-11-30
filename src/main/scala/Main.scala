@@ -4,7 +4,7 @@ import org.apache.spark.sql.expressions.Window
 import org.apache.spark.sql.{Column, DataFrame, SparkSession}
 import org.apache.spark.sql.functions._
 import org.apache.spark.sql.types.{DoubleType, IntegerType, LongType, StringType, StructField, StructType}
-import org.apache.spark.ml.regression.{LinearRegression, RandomForestRegressor}
+import org.apache.spark.ml.regression.{LinearRegression, RandomForestRegressor, GBTRegressor}
 import org.apache.spark.ml.feature.VectorAssembler
 import org.apache.spark.ml.evaluation.RegressionEvaluator
 import org.apache.spark.ml.feature.Imputer
@@ -229,13 +229,13 @@ object Main extends App{
   val validation = assembler.transform(validationInputed)
 
   //Linear Regression
-  val lr = new RandomForestRegressor()
+  val lr = new LinearRegression().setElasticNetParam(0.8).setMaxIter(100)
 
   // Fit the model
   val lrModel = lr.fit(training)
 
   // Print the coefficients and intercept for logistic regression
-  //println(s"Coefficients: ${lrModel.coefficients} Intercept: ${lrModel.intercept}")
+  println(s"Coefficients: ${lrModel.coefficients} Intercept: ${lrModel.intercept}")
 
   val predictions = lrModel.transform(test)
 
@@ -244,7 +244,6 @@ object Main extends App{
     .setPredictionCol("prediction")
     .setMetricName("mse")
 
-  println("Evaluating model")
   val accuracy = evaluator.evaluate(predictions)
   println(s"Test MSE: ${accuracy}")
 
