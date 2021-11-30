@@ -21,7 +21,7 @@ object Main extends App{
     StructField("Month",StringType,true),
     StructField("DayofMonth",StringType,true),
     StructField("DayofWeek", IntegerType,true),
-    StructField("Deptime",StringType,true),
+    StructField("DepTime",StringType,true),
     StructField("CRSDepTime",StringType,true),
     StructField("ArrTime",StringType,true),
     StructField("CRSArrTime",StringType,true),
@@ -73,7 +73,7 @@ object Main extends App{
 
   //Complete times
   val dfTimes = dfDate
-    .withColumn("Deptime", lpad($"Deptime", 4, "0"))
+    .withColumn("DepTime", lpad($"DepTime", 4, "0"))
     .withColumn("CRSDepTime", lpad($"CRSDepTime", 4, "0"))
     .withColumn("CRSArrTime", lpad($"CRSArrTime", 4, "0"))
 
@@ -106,8 +106,11 @@ object Main extends App{
     return dfOut
   }
 
-  val dfTimeEncoded = cyclicalEncodingTime(dfTimes, "Deptime")
-  println(dfTimeEncoded.where($"xDeptime".isNull).show(50))
+  val dfCRSDepTimeEncoded = cyclicalEncodingTime(dfTimes, "CRSDepTime")
+  //val dfCRSArrTimeEncoded = cyclicalEncodingTime(dfCRSDepTimeEncoded, "CRSArrTime")
+  //val dfDepTimeEncoded = cyclicalEncodingTime(dfCRSArrTimeEncoded, "DepTime")
+
+  println(dfCRSDepTimeEncoded.show(50))
 
   def cyclicalEncodingDate(dfIni: DataFrame, columnName:String) : DataFrame = {
     val dfOut = dfIni.withColumn("x", col(columnName))
