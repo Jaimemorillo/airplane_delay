@@ -195,7 +195,7 @@ object Main extends App{
   /////////////////////////////////////////////////
 
   val assembler = new VectorAssembler()
-    .setInputCols(Array("CRSElapsedTime","ArrDelay","DepDelay", "Distance", "TaxiOut", "xCRSDepTime",
+    .setInputCols(Array("CRSElapsedTime","DepDelay", "Distance", "TaxiOut", "xCRSDepTime",
       "yCRSDepTime", "xCRSArrTime", "yCRSArrTime", "xDepTime", "yDepTime", "xDayofYear", "yDayofYear",
       "UniqueCarrierEncoded", "DayofWeekEncoded", "FlightNumEncoded", "TailNumEncoded", "OriginEncoded",
       "DestEncoded"))
