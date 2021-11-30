@@ -4,6 +4,9 @@ import org.apache.spark.sql.expressions.Window
 import org.apache.spark.sql.{Column, DataFrame, SparkSession}
 import org.apache.spark.sql.functions._
 import org.apache.spark.sql.types.{DoubleType, IntegerType, LongType, StringType, StructField, StructType}
+import org.apache.spark.ml.regression.LinearRegression
+import org.apache.spark.ml.feature.VectorAssembler
+import org.apache.spark.ml.evaluation.RegressionEvaluator
 
 import scala.math.Pi
 
@@ -64,7 +67,7 @@ object Main extends App{
   val dfFilterCancelled = dfFilterArrDelay.filter($"Cancelled" === 0)
     .drop("Cancelled")
 
-  //Fill null values TaxiOut
+  //Fill null values TaxiOut (it should be done after train)
   val meanTaxiOUt = dfFilterArrDelay.select(mean("TaxiOut")).first().getDouble(0)
   val dfFilledTaxiOut = dfFilterCancelled.na.fill(meanTaxiOUt,Array("TaxiOut"))
 
@@ -119,8 +122,8 @@ object Main extends App{
 
   val dfCRSDepTimeEncoded = cyclicalEncodingTime(dfTimes, "CRSDepTime")
   val dfCRSArrTimeEncoded = cyclicalEncodingTime(dfCRSDepTimeEncoded, "CRSArrTime")
+  val dfDepTimeEncoded = cyclicalEncodingTime(dfCRSArrTimeEncoded, "DepTime")
     .drop("DepTime","CRSDepTime","CRSArrTime")
-  //val dfDepTimeEncoded = cyclicalEncodingTime(dfCRSArrTimeEncoded, "DepTime")
 
   def cyclicalEncodingDate(dfIni: DataFrame, columnName:String) : DataFrame = {
     val dfCyclical = (0 until 366).toList.toDF("Days")
@@ -135,27 +138,91 @@ object Main extends App{
     return dfOut
   }
 
-  val dfDateEncoded = cyclicalEncodingDate(dfCRSArrTimeEncoded, "DayofYear")
+  val dfDateEncoded = cyclicalEncodingDate(dfDepTimeEncoded, "DayofYear")
     .drop("Date", "DayofYear")
+    .withColumnRenamed("ArrDelay","label")
 
   //Encoding for categorical variables
   def meanTargetEncoding(dfIni: DataFrame, columnName:String) : DataFrame = {
     //JUST APPLY WITH TRAIN
     val dfOut = dfIni.withColumn(columnName + "Encoded",
-      round(avg("ArrDelay").over(Window.partitionBy(columnName)),6))
+      round(avg("label").over(Window.partitionBy(columnName)),6))
       .select(columnName, columnName + "Encoded")
       .distinct()
     return dfOut
   }
 
-  // Apply to train and join the resulting encoding with train, test and val
-  val uniqueCarrierEncoding = meanTargetEncoding(dfDateEncoded, "UniqueCarrier")
-  val DayofWeekEncoding = meanTargetEncoding(dfDateEncoded, "DayofWeek")
-  val FlightNumEncoding = meanTargetEncoding(dfDateEncoded, "FlightNum")
-  val TailNumEncoding = meanTargetEncoding(dfDateEncoded, "TailNum")
-  val OriginEncoding = meanTargetEncoding(dfDateEncoded, "Origin")
-  val DestEncoding = meanTargetEncoding(dfDateEncoded, "Dest")
+  // Split training, test and validation
+  val Array(trainingIni, testIni, validationIni) = dfDateEncoded.randomSplit(Array(0.6,0.2,0.2),seed=1)
 
-  println(OriginEncoding.show)
+  // Apply encoding function to train and join the result with training, test and val
+  val uniqueCarrierEncoding = meanTargetEncoding(trainingIni, "UniqueCarrier")
+  val dayofWeekEncoding = meanTargetEncoding(trainingIni, "DayofWeek")
+  val flightNumEncoding = meanTargetEncoding(trainingIni, "FlightNum")
+  val tailNumEncoding = meanTargetEncoding(trainingIni, "TailNum")
+  val originEncoding = meanTargetEncoding(trainingIni, "Origin")
+  val destEncoding = meanTargetEncoding(trainingIni, "Dest")
+
+  // Join with each sample
+  val dfTraining = trainingIni.join(uniqueCarrierEncoding, Seq("UniqueCarrier"), "left")
+    .join(dayofWeekEncoding, Seq("DayofWeek"), "left")
+    .join(flightNumEncoding, Seq("FlightNum"), "left")
+    .join(tailNumEncoding, Seq("TailNum"), "left")
+    .join(originEncoding, Seq("Origin"), "left")
+    .join(destEncoding, Seq("Dest"), "left")
+    .drop("UniqueCarrier", "DayofWeek", "FlightNum", "TailNum", "Origin", "Dest")
+
+  val dfTest = testIni.join(uniqueCarrierEncoding, Seq("UniqueCarrier"), "left")
+    .join(dayofWeekEncoding, Seq("DayofWeek"), "left")
+    .join(flightNumEncoding, Seq("FlightNum"), "left")
+    .join(tailNumEncoding, Seq("TailNum"), "left")
+    .join(originEncoding, Seq("Origin"), "left")
+    .join(destEncoding, Seq("Dest"), "left")
+    .drop("UniqueCarrier", "DayofWeek", "FlightNum", "TailNum", "Origin", "Dest")
+
+  val dfValidation = validationIni.join(uniqueCarrierEncoding, Seq("UniqueCarrier"), "left")
+    .join(dayofWeekEncoding, Seq("DayofWeek"), "left")
+    .join(flightNumEncoding, Seq("FlightNum"), "left")
+    .join(tailNumEncoding, Seq("TailNum"), "left")
+    .join(originEncoding, Seq("Origin"), "left")
+    .join(destEncoding, Seq("Dest"), "left")
+    .drop("UniqueCarrier", "DayofWeek", "FlightNum", "TailNum", "Origin", "Dest")
+
+  println(dfValidation.show)
+
+  /////////////////////////////////////////////////
+  ////////// MODEL ////////////////////////////////
+  /////////////////////////////////////////////////
+
+  val assembler = new VectorAssembler()
+    .setInputCols(Array("CRSElapsedTime","ArrDelay","DepDelay", "Distance", "TaxiOut", "xCRSDepTime",
+      "yCRSDepTime", "xCRSArrTime", "yCRSArrTime", "xDepTime", "yDepTime", "xDayofYear", "yDayofYear",
+      "UniqueCarrierEncoded", "DayofWeekEncoded", "FlightNumEncoded", "TailNumEncoded", "OriginEncoded",
+      "DestEncoded"))
+    .setOutputCol("features")
+
+  //Apply a normalizer ?¿¿¿¿
+
+  val training = assembler.transform(dfTraining)
+  val test = assembler.transform(dfTest)
+  val validation = assembler.transform(dfValidation)
+
+  //Linear Regression
+  val lr = new LinearRegression()
+
+  // Fit the model
+  val lrModel = lr.fit(training)
+
+  // Print the coefficients and intercept for logistic regression
+  println(s"Coefficients: ${lrModel.coefficients} Intercept: ${lrModel.intercept}")
+
+  val Predictions = lrModel.transform(test)
+
+  val evaluator = new RegressionEvaluator()
+    .setLabelCol("label")
+    .setPredictionCol("prediction")
+    .setMetricName("mse")
+  val accuracy = evaluator.evaluate(Predictions)
+  print(s"Test MSE: ${accuracy}")
 
 }
