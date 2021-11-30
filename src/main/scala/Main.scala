@@ -118,6 +118,7 @@ object Main extends App{
 
   val dfCRSDepTimeEncoded = cyclicalEncodingTime(dfTimes, "CRSDepTime")
   val dfCRSArrTimeEncoded = cyclicalEncodingTime(dfCRSDepTimeEncoded, "CRSArrTime")
+    .drop("DepTime","CRSDepTime","CRSArrTime")
   //val dfDepTimeEncoded = cyclicalEncodingTime(dfCRSArrTimeEncoded, "DepTime")
 
   def cyclicalEncodingDate(dfIni: DataFrame, columnName:String) : DataFrame = {
@@ -134,6 +135,8 @@ object Main extends App{
   }
 
   val dfDateEncoded = cyclicalEncodingDate(dfCRSArrTimeEncoded, "DayofYear")
+    .drop("Date", "DayofYear")
+
   //println(dfDateEncoded.show)
 
 }
