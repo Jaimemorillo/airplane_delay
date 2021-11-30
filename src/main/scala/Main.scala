@@ -1,5 +1,6 @@
 package es.upm.airplane
 import com.github.nscala_time.time.Imports._
+import org.apache.spark.sql.expressions.Window
 import org.apache.spark.sql.{Column, DataFrame, SparkSession}
 import org.apache.spark.sql.functions._
 import org.apache.spark.sql.types.{DoubleType, IntegerType, LongType, StringType, StructField, StructType}
@@ -137,6 +138,24 @@ object Main extends App{
   val dfDateEncoded = cyclicalEncodingDate(dfCRSArrTimeEncoded, "DayofYear")
     .drop("Date", "DayofYear")
 
-  //println(dfDateEncoded.show)
+  //Encoding for categorical variables
+  def meanTargetEncoding(dfIni: DataFrame, columnName:String) : DataFrame = {
+    //JUST APPLY WITH TRAIN
+    val dfOut = dfIni.withColumn(columnName + "Encoded",
+      round(avg("ArrDelay").over(Window.partitionBy(columnName)),6))
+      .select(columnName, columnName + "Encoded")
+      .distinct()
+    return dfOut
+  }
+
+  // Apply to train and join the resulting encoding with train, test and val
+  val uniqueCarrierEncoding = meanTargetEncoding(dfDateEncoded, "UniqueCarrier")
+  val DayofWeekEncoding = meanTargetEncoding(dfDateEncoded, "DayofWeek")
+  val FlightNumEncoding = meanTargetEncoding(dfDateEncoded, "FlightNum")
+  val TailNumEncoding = meanTargetEncoding(dfDateEncoded, "TailNum")
+  val OriginEncoding = meanTargetEncoding(dfDateEncoded, "Origin")
+  val DestEncoding = meanTargetEncoding(dfDateEncoded, "Dest")
+
+  println(OriginEncoding.show)
 
 }
