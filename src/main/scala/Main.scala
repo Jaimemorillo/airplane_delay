@@ -53,7 +53,7 @@ object Main extends App{
     StructField("LateAircraftDelay",StringType,true),
   ))
 
-  val df = spark.read.option("header",true).option("delimiter", ",").schema(schema).csv("./data/2008.csv.bz2")
+  val df = spark.read.option("header",true).option("delimiter", ",").schema(schema).csv("D:/UPM/Big Data/Assignment Spark/dataverse_files/2007.csv.bz2")
 
   // Remove forbidden columns and not useful ones
   val dfRemoveColumns= df.drop( "ArrTime","ActualElapsedTime",
@@ -68,7 +68,8 @@ object Main extends App{
     .drop("Cancelled")
 
   //Filter outliers (ArrDelay>80 and ArrDelay<-21)
-  val dfFilterOutliers = dfFilterCancelled.filter(($"ArrDelay"<=80) && ($"ArrDelay">=(-21)))
+  val dfFilterOutliers = dfFilterCancelled.filter(($"ArrDelay"<=80) && ($"ArrDelay">=(-20)))
+
 
   //Filter out null values
   val dfNullDropped = dfFilterOutliers.na.drop("any", Seq("Month","DayofMonth","DayofWeek","DepTime","CRSDepTime",
@@ -216,12 +217,18 @@ object Main extends App{
   /////////////////////////////////////////////////
   ////////// MODEL ////////////////////////////////
   /////////////////////////////////////////////////
-
+/*
   val assembler = new VectorAssembler()
     .setInputCols(Array("CRSElapsedTime","DepDelay", "Distance", "TaxiOutImputed", "xCRSDepTime",
       "yCRSDepTime", "xCRSArrTime", "yCRSArrTime", "xDepTime", "yDepTime", "xDayofYear", "yDayofYear",
       "UniqueCarrierEncodedImputed", "DayofWeekEncodedImputed", "FlightNumEncodedImputed", "TailNumEncodedImputed",
       "OriginEncodedImputed", "DestEncodedImputed"))
+    .setOutputCol("features")
+*/
+  val assembler = new VectorAssembler()
+    .setInputCols(Array("CRSElapsedTime","DepDelay", "Distance", "TaxiOutImputed","xDepTime",
+       "yDepTime", "xDayofYear", "yDayofYear",
+       "DayofWeekEncodedImputed", "OriginEncodedImputed", "DestEncodedImputed"))
     .setOutputCol("features")
 
   val trainingAs = assembler.transform(trainingInputed)
@@ -233,7 +240,6 @@ object Main extends App{
     .setInputCol("features")
     .setOutputCol("scaledFeatures")
     .setWithStd(true)
-    .setWithMean(false)
 
   val scalerModel = scaler.fit(trainingAs)
   val training = scalerModel.transform(trainingAs)
@@ -244,21 +250,31 @@ object Main extends App{
   val lr = new LinearRegression()
     .setFeaturesCol("scaledFeatures")
     .setLabelCol("label")
+    .setStandardization(false)
+
 
   // Fit the model
   val lrModel = lr.fit(training)
 
-  // Print the coefficients and intercept for logistic regression
+  // Print the coefficients and intercept for linear regression
   //println(s"Coefficients: ${lrModel.coefficients} Intercept: ${lrModel.intercept}")
 
   val predictions = lrModel.transform(test)
 
-  val evaluator = new RegressionEvaluator()
+  val evaluatorMse = new RegressionEvaluator()
     .setLabelCol("label")
     .setPredictionCol("prediction")
     .setMetricName("mse")
 
-  val accuracy = evaluator.evaluate(predictions)
-  println(s"Test MSE: ${accuracy}")
+  val evaluatorRmse = new RegressionEvaluator()
+    .setLabelCol("label")
+    .setPredictionCol("prediction")
+    .setMetricName("rmse")
+
+  val mse = evaluatorMse.evaluate(predictions)
+  println(s"Test MSE: ${mse}")
+
+  val rmse = evaluatorRmse.evaluate(predictions)
+  println(s"Test RMSE: ${rmse}")
 
 }
