@@ -4,10 +4,9 @@ import org.apache.spark.sql.expressions.Window
 import org.apache.spark.sql.{Column, DataFrame, SparkSession}
 import org.apache.spark.sql.functions._
 import org.apache.spark.sql.types.{DoubleType, IntegerType, LongType, StringType, StructField, StructType}
-import org.apache.spark.ml.regression.{LinearRegression, RandomForestRegressor, GBTRegressor}
-import org.apache.spark.ml.feature.VectorAssembler
+import org.apache.spark.ml.regression.{GBTRegressor, GeneralizedLinearRegression, LinearRegression, RandomForestRegressor}
+import org.apache.spark.ml.feature.{Imputer, Normalizer, StandardScaler, VectorAssembler}
 import org.apache.spark.ml.evaluation.RegressionEvaluator
-import org.apache.spark.ml.feature.Imputer
 
 import scala.math.Pi
 
@@ -211,8 +210,6 @@ object Main extends App{
     "DayofWeekEncoded", "FlightNumEncoded", "TailNumEncoded", "OriginEncoded", "DestEncoded").cache()
   validationInputed.show(false)
 
-  //Apply a normalizer ?¿¿¿¿
-
   /////////////////////////////////////////////////
   ////////// MODEL ////////////////////////////////
   /////////////////////////////////////////////////
@@ -224,18 +221,32 @@ object Main extends App{
       "OriginEncodedImputed", "DestEncodedImputed"))
     .setOutputCol("features")
 
-  val training = assembler.transform(trainingInputed)
-  val test = assembler.transform(testInputed)
-  val validation = assembler.transform(validationInputed)
+  val trainingAs = assembler.transform(trainingInputed)
+  val testAs = assembler.transform(testInputed)
+  val validationAs = assembler.transform(validationInputed)
+
+  //Apply a normalizer
+  val scaler = new StandardScaler()
+    .setInputCol("features")
+    .setOutputCol("scaledFeatures")
+    .setWithStd(true)
+    .setWithMean(false)
+
+  val scalerModel = scaler.fit(trainingAs)
+  val training = scalerModel.transform(trainingAs)
+  val test = scalerModel.transform(testAs)
+  val validation = scalerModel.transform(validationAs)
 
   //Linear Regression
-  val lr = new LinearRegression().setElasticNetParam(0.8).setMaxIter(100)
+  val lr = new GeneralizedLinearRegression().setFamily("gaussian")
+    .setFeaturesCol("normFeatures")
+    .setLabelCol("label")
 
   // Fit the model
   val lrModel = lr.fit(training)
 
   // Print the coefficients and intercept for logistic regression
-  println(s"Coefficients: ${lrModel.coefficients} Intercept: ${lrModel.intercept}")
+  //println(s"Coefficients: ${lrModel.coefficients} Intercept: ${lrModel.intercept}")
 
   val predictions = lrModel.transform(test)
 
