@@ -238,8 +238,8 @@ object Main extends App{
   val validation = scalerModel.transform(validationAs)
 
   //Linear Regression
-  val lr = new GeneralizedLinearRegression().setFamily("gaussian")
-    .setFeaturesCol("normFeatures")
+  val lr = new LinearRegression()
+    .setFeaturesCol("scaledFeatures")
     .setLabelCol("label")
 
   // Fit the model
