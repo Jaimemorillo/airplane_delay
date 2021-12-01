@@ -67,6 +67,9 @@ object Main extends App{
   val dfFilterCancelled = dfFilterArrDelay.filter($"Cancelled" === 0)
     .drop("Cancelled")
 
+  //Filter outliers (ArrDelay>80 and ArrDelay<-21)
+  val dfFilterOutliers = dfFilterArrDelay.filter(($"ArrDelay"<=80) && ($"ArrDelay">=(-21)))
+
   //Filter out null values
   val dfNullDropped = dfFilterCancelled.na.drop("any", Seq("Month","DayofMonth","DayofWeek","DepTime","CRSDepTime",
     "CRSArrTime", "UniqueCarrier","FlightNum","TailNum","CRSElapsedTime","ArrDelay","DepDelay","Origin","Dest","Distance"))
