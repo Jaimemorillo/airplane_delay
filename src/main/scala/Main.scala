@@ -53,7 +53,7 @@ object Main extends App{
     StructField("LateAircraftDelay",StringType,true),
   ))
 
-  val df = spark.read.option("header",true).option("delimiter", ",").schema(schema).csv("D:/UPM/Big Data/Assignment Spark/dataverse_files/2007.csv.bz2")
+  val df = spark.read.option("header",true).option("delimiter", ",").schema(schema).csv("./data/2007.csv.bz2")
 
   // Remove forbidden columns and not useful ones
   val dfRemoveColumns= df.drop( "ArrTime","ActualElapsedTime",
@@ -69,7 +69,6 @@ object Main extends App{
 
   //Filter outliers (ArrDelay>80 and ArrDelay<-21)
   val dfFilterOutliers = dfFilterCancelled.filter(($"ArrDelay"<=80) && ($"ArrDelay">=(-20)))
-
 
   //Filter out null values
   val dfNullDropped = dfFilterOutliers.na.drop("any", Seq("Month","DayofMonth","DayofWeek","DepTime","CRSDepTime",
@@ -88,11 +87,12 @@ object Main extends App{
       lit("2002")))
     .withColumn("Date", to_date($"DateString", "dd-MM-yyyy"))
     .withColumn("DayofYear", date_format($"Date", "D"))
-    .drop("DayofMonth", "Month", "Year", "DateString")
+    .drop("DayofMonth", "Year", "DateString")
 
   //Complete times
   val dfTimes = dfDate
     .withColumn("DepTime", lpad($"DepTime", 4, "0"))
+    .withColumn("DepHour", substring($"DepTime",0,2))
     .withColumn("CRSDepTime", lpad($"CRSDepTime", 4, "0"))
     .withColumn("CRSArrTime", lpad($"CRSArrTime", 4, "0"))
 
@@ -121,9 +121,9 @@ object Main extends App{
     return dfOut
   }
 
-  val dfCRSDepTimeEncoded = cyclicalEncodingTime(dfTimes, "CRSDepTime")
-  val dfCRSArrTimeEncoded = cyclicalEncodingTime(dfCRSDepTimeEncoded, "CRSArrTime")
-  val dfDepTimeEncoded = cyclicalEncodingTime(dfCRSArrTimeEncoded, "DepTime")
+  //val dfCRSDepTimeEncoded = cyclicalEncodingTime(dfTimes, "CRSDepTime")
+  //val dfCRSArrTimeEncoded = cyclicalEncodingTime(dfCRSDepTimeEncoded, "CRSArrTime")
+  val dfDepTimeEncoded = cyclicalEncodingTime(dfTimes, "DepTime")
     .drop("DepTime","CRSDepTime","CRSArrTime")
 
   def cyclicalEncodingDate(dfIni: DataFrame, columnName:String) : DataFrame = {
@@ -145,7 +145,7 @@ object Main extends App{
 
   //Encoding for categorical variables
   def meanTargetEncoding(dfIni: DataFrame, columnName:String) : DataFrame = {
-    //JUST APPLY WITH TRAIN
+    //Return a dataframe with the og. variable and the variable with mean target encoding as columnNameEncoded
     val dfOut = dfIni.withColumn(columnName + "Encoded",
       round(avg("label").over(Window.partitionBy(columnName)),6))
       .select(columnName, columnName + "Encoded")
@@ -157,61 +157,74 @@ object Main extends App{
   val Array(trainingIni, testIni, validationIni) = dfDateEncoded.randomSplit(Array(0.6,0.2,0.2),seed=1)
 
   // Apply encoding function to train and join the result with training, test and val
-  val uniqueCarrierEncoding = meanTargetEncoding(trainingIni, "UniqueCarrier").cache()
-  uniqueCarrierEncoding.show(false)
+  //val uniqueCarrierEncoding = meanTargetEncoding(trainingIni, "UniqueCarrier").cache()
+  //uniqueCarrierEncoding.show(false)
   val dayofWeekEncoding = meanTargetEncoding(trainingIni, "DayofWeek").cache()
   dayofWeekEncoding.show(false)
-  val flightNumEncoding = meanTargetEncoding(trainingIni, "FlightNum").cache()
-  flightNumEncoding.show(false)
-  val tailNumEncoding = meanTargetEncoding(trainingIni, "TailNum").cache()
-  tailNumEncoding.show(false)
+  //val flightNumEncoding = meanTargetEncoding(trainingIni, "FlightNum").cache()
+  //flightNumEncoding.show(false)
+  //val tailNumEncoding = meanTargetEncoding(trainingIni, "TailNum").cache()
+  //tailNumEncoding.show(false)
   val originEncoding = meanTargetEncoding(trainingIni, "Origin").cache()
   originEncoding.show(false)
   val destEncoding = meanTargetEncoding(trainingIni, "Dest").cache()
   destEncoding.show(false)
+  val depHourEncoding = meanTargetEncoding(trainingIni, "DepHour").cache()
+  depHourEncoding.show(false)
+  val monthEncoding = meanTargetEncoding(trainingIni, "Month").cache()
+  monthEncoding.show(false)
 
   // Join with each sample
-  val dfTraining = trainingIni.join(uniqueCarrierEncoding, Seq("UniqueCarrier"), "left")
+  val dfTraining = trainingIni
+    //.join(uniqueCarrierEncoding, Seq("UniqueCarrier"), "left")
     .join(dayofWeekEncoding, Seq("DayofWeek"), "left")
-    .join(flightNumEncoding, Seq("FlightNum"), "left")
-    .join(tailNumEncoding, Seq("TailNum"), "left")
+    //.join(flightNumEncoding, Seq("FlightNum"), "left")
+    //.join(tailNumEncoding, Seq("TailNum"), "left")
     .join(originEncoding, Seq("Origin"), "left")
     .join(destEncoding, Seq("Dest"), "left")
-    .drop("UniqueCarrier", "DayofWeek", "FlightNum", "TailNum", "Origin", "Dest")
+    .join(depHourEncoding, Seq("DepHour"), "left")
+    .join(monthEncoding, Seq("Month"), "left")
+    .drop("UniqueCarrier", "DayofWeek", "FlightNum", "TailNum", "Origin", "Dest", "DepHour", "Month")
 
-  val dfTest = testIni.join(uniqueCarrierEncoding, Seq("UniqueCarrier"), "left")
+  val dfTest = testIni
+    //.join(uniqueCarrierEncoding, Seq("UniqueCarrier"), "left")
     .join(dayofWeekEncoding, Seq("DayofWeek"), "left")
-    .join(flightNumEncoding, Seq("FlightNum"), "left")
-    .join(tailNumEncoding, Seq("TailNum"), "left")
+    //.join(flightNumEncoding, Seq("FlightNum"), "left")
+    //.join(tailNumEncoding, Seq("TailNum"), "left")
     .join(originEncoding, Seq("Origin"), "left")
     .join(destEncoding, Seq("Dest"), "left")
-    .drop("UniqueCarrier", "DayofWeek", "FlightNum", "TailNum", "Origin", "Dest")
+    .join(depHourEncoding, Seq("DepHour"), "left")
+    .join(monthEncoding, Seq("Month"), "left")
+    .drop("UniqueCarrier", "DayofWeek", "FlightNum", "TailNum", "Origin", "Dest", "DepHour", "Month")
 
-  val dfValidation = validationIni.join(uniqueCarrierEncoding, Seq("UniqueCarrier"), "left")
+  val dfValidation = validationIni
+    //.join(uniqueCarrierEncoding, Seq("UniqueCarrier"), "left")
     .join(dayofWeekEncoding, Seq("DayofWeek"), "left")
-    .join(flightNumEncoding, Seq("FlightNum"), "left")
-    .join(tailNumEncoding, Seq("TailNum"), "left")
+    //.join(flightNumEncoding, Seq("FlightNum"), "left")
+    //.join(tailNumEncoding, Seq("TailNum"), "left")
     .join(originEncoding, Seq("Origin"), "left")
     .join(destEncoding, Seq("Dest"), "left")
-    .drop("UniqueCarrier", "DayofWeek", "FlightNum", "TailNum", "Origin", "Dest")
+    .join(depHourEncoding, Seq("DepHour"), "left")
+    .join(monthEncoding, Seq("Month"), "left")
+    .drop("UniqueCarrier", "DayofWeek", "FlightNum", "TailNum", "Origin", "Dest", "DepHour", "Month")
 
   //Fill null values
-  val colsNames = Array("TaxiOut", "UniqueCarrierEncoded", "DayofWeekEncoded", "FlightNumEncoded",
-    "TailNumEncoded", "OriginEncoded", "DestEncoded")
+  val colsNames = Array("TaxiOut",  "DayofWeekEncoded", //"UniqueCarrierEncoded", "FlightNumEncoded", "TailNumEncoded",
+    "OriginEncoded", "DestEncoded", "DepHourEncoded", "MonthEncoded")
   val imputer = new Imputer()
     .setInputCols(colsNames)
     .setOutputCols(colsNames.map(c => s"${c}Imputed"))
     .setStrategy("median")
   val imputerModel = imputer.fit(dfTraining)
 
-  val trainingInputed = imputerModel.transform(dfTraining).drop("TaxiOut", "UniqueCarrierEncoded",
-    "DayofWeekEncoded", "FlightNumEncoded", "TailNumEncoded", "OriginEncoded", "DestEncoded").cache()
+  val trainingInputed = imputerModel.transform(dfTraining).drop("TaxiOut", //"UniqueCarrierEncoded", "FlightNumEncoded", "TailNumEncoded",
+    "DayofWeekEncoded",  "OriginEncoded", "DestEncoded", "DepHourEncoded", "MonthEncoded").cache()
   trainingInputed.show(false)
-  val testInputed = imputerModel.transform(dfTest).drop("TaxiOut", "UniqueCarrierEncoded",
-    "DayofWeekEncoded", "FlightNumEncoded", "TailNumEncoded", "OriginEncoded", "DestEncoded").cache()
+  val testInputed = imputerModel.transform(dfTest).drop("TaxiOut", //"UniqueCarrierEncoded", "FlightNumEncoded", "TailNumEncoded",
+    "DayofWeekEncoded", "OriginEncoded", "DestEncoded", "DepHourEncoded", "MonthEncoded").cache()
   testInputed.show(false)
-  val validationInputed = imputerModel.transform(dfValidation).drop("TaxiOut", "UniqueCarrierEncoded",
-    "DayofWeekEncoded", "FlightNumEncoded", "TailNumEncoded", "OriginEncoded", "DestEncoded").cache()
+  val validationInputed = imputerModel.transform(dfValidation).drop("TaxiOut", //"UniqueCarrierEncoded", "FlightNumEncoded", "TailNumEncoded",
+    "DayofWeekEncoded", "OriginEncoded", "DestEncoded", "DepHourEncoded", "MonthEncoded").cache()
   validationInputed.show(false)
 
   /////////////////////////////////////////////////
@@ -226,9 +239,9 @@ object Main extends App{
     .setOutputCol("features")
 */
   val assembler = new VectorAssembler()
-    .setInputCols(Array("CRSElapsedTime","DepDelay", "Distance", "TaxiOutImputed","xDepTime",
-       "yDepTime", "xDayofYear", "yDayofYear",
-       "DayofWeekEncodedImputed", "OriginEncodedImputed", "DestEncodedImputed"))
+    .setInputCols(Array("CRSElapsedTime","DepDelay", "Distance", "TaxiOutImputed", "xDayofYear", "yDayofYear",
+      "xDepTime", "yDepTime","DayofWeekEncodedImputed", "OriginEncodedImputed",
+      "DestEncodedImputed", "DepHourEncodedImputed", "MonthEncodedImputed"))
     .setOutputCol("features")
 
   val trainingAs = assembler.transform(trainingInputed)
@@ -259,6 +272,7 @@ object Main extends App{
   // Print the coefficients and intercept for linear regression
   //println(s"Coefficients: ${lrModel.coefficients} Intercept: ${lrModel.intercept}")
 
+  // Evaluate the model
   val predictions = lrModel.transform(test)
 
   val evaluatorMse = new RegressionEvaluator()
@@ -271,10 +285,26 @@ object Main extends App{
     .setPredictionCol("prediction")
     .setMetricName("rmse")
 
+  val evaluatorMae = new RegressionEvaluator()
+    .setLabelCol("label")
+    .setPredictionCol("prediction")
+    .setMetricName("mae")
+
+  val evaluatorr2 = new RegressionEvaluator()
+    .setLabelCol("label")
+    .setPredictionCol("prediction")
+    .setMetricName("r2")
+
   val mse = evaluatorMse.evaluate(predictions)
   println(s"Test MSE: ${mse}")
 
   val rmse = evaluatorRmse.evaluate(predictions)
   println(s"Test RMSE: ${rmse}")
+
+  val mae = evaluatorMae.evaluate(predictions)
+  println(s"Test MAE: ${mae}")
+
+  val r2 = evaluatorr2.evaluate(predictions)
+  println(s"Test R2: ${r2}")
 
 }
