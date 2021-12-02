@@ -233,9 +233,9 @@ object Main extends App{
     .setFeaturesCol("scaledFeatures")
     .setLabelCol("label")
     .setPredictionCol("predictionRf")
-    .setMaxDepth(3)
-    .setNumTrees(10)
-    .setMaxBins(32)
+    .setMaxDepth(12)
+    .setNumTrees(100)
+    .setMaxBins(128)
 
   // Pipeline
   val pipeline = new Pipeline()
@@ -250,7 +250,8 @@ object Main extends App{
   val validationPredictions = model.transform(validation)
 
   // Print the metrics
-  def getMetrics(sample: DataFrame, sampleName: String, model:String):Unit={
+  def getMetrics(sample: DataFrame, sampleName: String, model:String):(String, String, Double, Double)={
+    //Return a tuple with the model, sample, rmse and r2
     val evaluatorRmse = new RegressionEvaluator()
       .setLabelCol("label")
       .setPredictionCol("prediction" + model)
@@ -263,23 +264,24 @@ object Main extends App{
     val rmse = evaluatorRmse.evaluate(sample)
     val r2 = evaluatorR2.evaluate(sample)
 
-    println(sampleName + " - " + s"RMSE: ${rmse}" + " " + s"R2: ${r2}}")
+    return (model, sampleName, rmse, r2)
   }
 
   /////////////////////////////////////////////////
   ////////// RESULTS //////////////////////////////
   /////////////////////////////////////////////////
 
-  // TODO Print as dataframe
-  //Evaluate LR
-  getMetrics(trainPredictions, "Training", "Lr")
-  getMetrics(testPredictions, "Test", "Lr")
-  getMetrics(validationPredictions, "Validation", "Lr")
+  val results  = spark.createDataFrame(Seq(
+    getMetrics(trainPredictions, "Training", "Lr"),
+    getMetrics(testPredictions, "Test", "Lr"),
+    getMetrics(validationPredictions, "Validation", "Lr"),
+    getMetrics(trainPredictions, "Training", "Rf"),
+    getMetrics(testPredictions, "Test", "Rf"),
+    getMetrics(validationPredictions, "Validation", "Rf")
+  )).toDF("Model","Sample","RMSE","R-squared")
+    .withColumn("RMSE", round($"RMSE",3))
+    .withColumn("R-squared", round($"R-squared",3))
 
-  //Evaluate RF
-  getMetrics(trainPredictions, "Training", "Rf")
-  getMetrics(testPredictions, "Test", "Rf")
-  getMetrics(validationPredictions, "Validation", "Rf")
-
+  println(results.show)
 }
 
