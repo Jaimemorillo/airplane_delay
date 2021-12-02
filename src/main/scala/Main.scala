@@ -1,11 +1,12 @@
 package es.upm.airplane
 import com.github.nscala_time.time.Imports._
+import org.apache.spark.ml.Pipeline
 import org.apache.spark.sql.expressions.Window
-import org.apache.spark.sql.{Column, DataFrame, SparkSession}
+import org.apache.spark.sql.{DataFrame, SparkSession}
 import org.apache.spark.sql.functions._
-import org.apache.spark.sql.types.{DoubleType, IntegerType, LongType, StringType, StructField, StructType}
-import org.apache.spark.ml.regression.{GBTRegressor, GeneralizedLinearRegression, LinearRegression, RandomForestRegressor}
-import org.apache.spark.ml.feature.{Imputer, Normalizer, StandardScaler, VectorAssembler}
+import org.apache.spark.sql.types.{DoubleType, IntegerType, StringType, StructField, StructType}
+import org.apache.spark.ml.regression.{LinearRegression, RandomForestRegressor}
+import org.apache.spark.ml.feature.{Imputer, StandardScaler, VectorAssembler}
 import org.apache.spark.ml.evaluation.RegressionEvaluator
 
 import scala.math.Pi
@@ -53,7 +54,12 @@ object Main extends App{
     StructField("LateAircraftDelay",StringType,true),
   ))
 
+  // Read the data
   val df = spark.read.option("header",true).option("delimiter", ",").schema(schema).csv("./data/2007.csv.bz2")
+
+  /////////////////////////////////////////////////
+  ////////// INITIAL TRANSFORMATIONS //////////////
+  /////////////////////////////////////////////////
 
   // Remove forbidden columns and not useful ones
   val dfRemoveColumns= df.drop( "ArrTime","ActualElapsedTime",
@@ -74,7 +80,7 @@ object Main extends App{
   val dfNullDropped = dfFilterOutliers.na.drop("any", Seq("Month","DayofMonth","DayofWeek","DepTime","CRSDepTime",
     "CRSArrTime", "UniqueCarrier","FlightNum","TailNum","CRSElapsedTime","ArrDelay","DepDelay","Origin","Dest","Distance"))
 
-  //Merge full date (Leap-year¿?)
+  //Merge full date and manage leap-year
   val dfDate = dfNullDropped
     .withColumn("DayofMonth",
       when($"DayofMonth"===29 && $"Month"===2, 28)
@@ -87,12 +93,11 @@ object Main extends App{
       lit("2002")))
     .withColumn("Date", to_date($"DateString", "dd-MM-yyyy"))
     .withColumn("DayofYear", date_format($"Date", "D"))
-    .drop("DayofMonth", "Year", "DateString")
+    .drop("DayofMonth", "Year", "DateString", "Month")
 
   //Complete times
   val dfTimes = dfDate
     .withColumn("DepTime", lpad($"DepTime", 4, "0"))
-    .withColumn("DepHour", substring($"DepTime",0,2))
     .withColumn("CRSDepTime", lpad($"CRSDepTime", 4, "0"))
     .withColumn("CRSArrTime", lpad($"CRSArrTime", 4, "0"))
 
@@ -121,10 +126,10 @@ object Main extends App{
     return dfOut
   }
 
-  //val dfCRSDepTimeEncoded = cyclicalEncodingTime(dfTimes, "CRSDepTime")
-  //val dfCRSArrTimeEncoded = cyclicalEncodingTime(dfCRSDepTimeEncoded, "CRSArrTime")
   val dfDepTimeEncoded = cyclicalEncodingTime(dfTimes, "DepTime")
     .drop("DepTime","CRSDepTime","CRSArrTime")
+  //val dfCRSDepTimeEncoded = cyclicalEncodingTime(dfDepTimeEncoded, "CRSDepTime")
+  //val dfCRSArrTimeEncoded = cyclicalEncodingTime(dfCRSDepTimeEncoded, "CRSArrTime")
 
   def cyclicalEncodingDate(dfIni: DataFrame, columnName:String) : DataFrame = {
     val dfCyclical = (0 until 366).toList.toDF("Days")
@@ -156,97 +161,58 @@ object Main extends App{
   // Split training, test and validation
   val Array(trainingIni, testIni, validationIni) = dfDateEncoded.randomSplit(Array(0.6,0.2,0.2),seed=1)
 
-  // Apply encoding function to train and join the result with training, test and val
-  //val uniqueCarrierEncoding = meanTargetEncoding(trainingIni, "UniqueCarrier").cache()
-  //uniqueCarrierEncoding.show(false)
+  // Apply encoding function to the train and join the result with training, test and val
   val dayofWeekEncoding = meanTargetEncoding(trainingIni, "DayofWeek").cache()
   dayofWeekEncoding.show(false)
-  //val flightNumEncoding = meanTargetEncoding(trainingIni, "FlightNum").cache()
-  //flightNumEncoding.show(false)
-  //val tailNumEncoding = meanTargetEncoding(trainingIni, "TailNum").cache()
-  //tailNumEncoding.show(false)
   val originEncoding = meanTargetEncoding(trainingIni, "Origin").cache()
   originEncoding.show(false)
   val destEncoding = meanTargetEncoding(trainingIni, "Dest").cache()
   destEncoding.show(false)
-  val depHourEncoding = meanTargetEncoding(trainingIni, "DepHour").cache()
-  depHourEncoding.show(false)
-  val monthEncoding = meanTargetEncoding(trainingIni, "Month").cache()
-  monthEncoding.show(false)
+  //val uniqueCarrierEncoding = meanTargetEncoding(trainingIni, "UniqueCarrier").cache()
+  //uniqueCarrierEncoding.show(false)
+  //val flightNumEncoding = meanTargetEncoding(trainingIni, "FlightNum").cache()
+  //flightNumEncoding.show(false)
+  //val tailNumEncoding = meanTargetEncoding(trainingIni, "TailNum").cache()
+  //tailNumEncoding.show(false)
 
-  // Join with each sample
-  val dfTraining = trainingIni
-    //.join(uniqueCarrierEncoding, Seq("UniqueCarrier"), "left")
+  // Join each sample with target encoding for categorical variables
+  val training = trainingIni
     .join(dayofWeekEncoding, Seq("DayofWeek"), "left")
-    //.join(flightNumEncoding, Seq("FlightNum"), "left")
-    //.join(tailNumEncoding, Seq("TailNum"), "left")
     .join(originEncoding, Seq("Origin"), "left")
     .join(destEncoding, Seq("Dest"), "left")
-    .join(depHourEncoding, Seq("DepHour"), "left")
-    .join(monthEncoding, Seq("Month"), "left")
-    .drop("UniqueCarrier", "DayofWeek", "FlightNum", "TailNum", "Origin", "Dest", "DepHour", "Month")
+    .drop("UniqueCarrier", "DayofWeek", "FlightNum", "TailNum", "Origin", "Dest").cache()
+  training.show(false)
 
-  val dfTest = testIni
-    //.join(uniqueCarrierEncoding, Seq("UniqueCarrier"), "left")
+  val test = testIni
     .join(dayofWeekEncoding, Seq("DayofWeek"), "left")
-    //.join(flightNumEncoding, Seq("FlightNum"), "left")
-    //.join(tailNumEncoding, Seq("TailNum"), "left")
     .join(originEncoding, Seq("Origin"), "left")
     .join(destEncoding, Seq("Dest"), "left")
-    .join(depHourEncoding, Seq("DepHour"), "left")
-    .join(monthEncoding, Seq("Month"), "left")
-    .drop("UniqueCarrier", "DayofWeek", "FlightNum", "TailNum", "Origin", "Dest", "DepHour", "Month")
+    .drop("UniqueCarrier", "DayofWeek", "FlightNum", "TailNum", "Origin", "Dest").cache()
+  test.show(false)
 
-  val dfValidation = validationIni
-    //.join(uniqueCarrierEncoding, Seq("UniqueCarrier"), "left")
+  val validation = validationIni
     .join(dayofWeekEncoding, Seq("DayofWeek"), "left")
-    //.join(flightNumEncoding, Seq("FlightNum"), "left")
-    //.join(tailNumEncoding, Seq("TailNum"), "left")
     .join(originEncoding, Seq("Origin"), "left")
     .join(destEncoding, Seq("Dest"), "left")
-    .join(depHourEncoding, Seq("DepHour"), "left")
-    .join(monthEncoding, Seq("Month"), "left")
-    .drop("UniqueCarrier", "DayofWeek", "FlightNum", "TailNum", "Origin", "Dest", "DepHour", "Month")
+    .drop("UniqueCarrier", "DayofWeek", "FlightNum", "TailNum", "Origin", "Dest").cache()
+  validation.cache()
+
+  /////////////////////////////////////////////////
+  ////////// MODEL PIPELINE ///////////////////////
+  /////////////////////////////////////////////////
 
   //Fill null values
-  val colsNames = Array("TaxiOut",  "DayofWeekEncoded", //"UniqueCarrierEncoded", "FlightNumEncoded", "TailNumEncoded",
-    "OriginEncoded", "DestEncoded", "DepHourEncoded", "MonthEncoded")
+  val colsNames = Array("TaxiOut",  "DayofWeekEncoded", "OriginEncoded", "DestEncoded")
   val imputer = new Imputer()
     .setInputCols(colsNames)
     .setOutputCols(colsNames.map(c => s"${c}Imputed"))
     .setStrategy("median")
-  val imputerModel = imputer.fit(dfTraining)
 
-  val trainingInputed = imputerModel.transform(dfTraining).drop("TaxiOut", //"UniqueCarrierEncoded", "FlightNumEncoded", "TailNumEncoded",
-    "DayofWeekEncoded",  "OriginEncoded", "DestEncoded", "DepHourEncoded", "MonthEncoded").cache()
-  trainingInputed.show(false)
-  val testInputed = imputerModel.transform(dfTest).drop("TaxiOut", //"UniqueCarrierEncoded", "FlightNumEncoded", "TailNumEncoded",
-    "DayofWeekEncoded", "OriginEncoded", "DestEncoded", "DepHourEncoded", "MonthEncoded").cache()
-  testInputed.show(false)
-  val validationInputed = imputerModel.transform(dfValidation).drop("TaxiOut", //"UniqueCarrierEncoded", "FlightNumEncoded", "TailNumEncoded",
-    "DayofWeekEncoded", "OriginEncoded", "DestEncoded", "DepHourEncoded", "MonthEncoded").cache()
-  validationInputed.show(false)
-
-  /////////////////////////////////////////////////
-  ////////// MODEL ////////////////////////////////
-  /////////////////////////////////////////////////
-/*
-  val assembler = new VectorAssembler()
-    .setInputCols(Array("CRSElapsedTime","DepDelay", "Distance", "TaxiOutImputed", "xCRSDepTime",
-      "yCRSDepTime", "xCRSArrTime", "yCRSArrTime", "xDepTime", "yDepTime", "xDayofYear", "yDayofYear",
-      "UniqueCarrierEncodedImputed", "DayofWeekEncodedImputed", "FlightNumEncodedImputed", "TailNumEncodedImputed",
-      "OriginEncodedImputed", "DestEncodedImputed"))
-    .setOutputCol("features")
-*/
+  //Feautures Assembler
   val assembler = new VectorAssembler()
     .setInputCols(Array("CRSElapsedTime","DepDelay", "Distance", "TaxiOutImputed", "xDayofYear", "yDayofYear",
-      "xDepTime", "yDepTime","DayofWeekEncodedImputed", "OriginEncodedImputed",
-      "DestEncodedImputed", "DepHourEncodedImputed", "MonthEncodedImputed"))
+      "xDepTime", "yDepTime","DayofWeekEncodedImputed", "OriginEncodedImputed", "DestEncodedImputed"))
     .setOutputCol("features")
-
-  val trainingAs = assembler.transform(trainingInputed)
-  val testAs = assembler.transform(testInputed)
-  val validationAs = assembler.transform(validationInputed)
 
   //Apply a normalizer
   val scaler = new StandardScaler()
@@ -254,57 +220,66 @@ object Main extends App{
     .setOutputCol("scaledFeatures")
     .setWithStd(true)
 
-  val scalerModel = scaler.fit(trainingAs)
-  val training = scalerModel.transform(trainingAs)
-  val test = scalerModel.transform(testAs)
-  val validation = scalerModel.transform(validationAs)
-
   //Linear Regression
   val lr = new LinearRegression()
     .setFeaturesCol("scaledFeatures")
+    .setPredictionCol("predictionLr")
     .setLabelCol("label")
+    .setElasticNetParam(0)
     .setStandardization(false)
 
+  //Random Forest
+  val rf = new RandomForestRegressor()
+    .setFeaturesCol("scaledFeatures")
+    .setLabelCol("label")
+    .setPredictionCol("predictionRf")
+    .setMaxDepth(3)
+    .setNumTrees(10)
+    .setMaxBins(32)
+
+  // Pipeline
+  val pipeline = new Pipeline()
+    .setStages(Array(imputer, assembler, scaler, lr, rf))
 
   // Fit the model
-  val lrModel = lr.fit(training)
-
-  // Print the coefficients and intercept for linear regression
-  //println(s"Coefficients: ${lrModel.coefficients} Intercept: ${lrModel.intercept}")
+  val model = pipeline.fit(training)
 
   // Evaluate the model
-  val predictions = lrModel.transform(test)
+  val trainPredictions = model.transform(training)
+  val testPredictions = model.transform(test)
+  val validationPredictions = model.transform(validation)
 
-  val evaluatorMse = new RegressionEvaluator()
-    .setLabelCol("label")
-    .setPredictionCol("prediction")
-    .setMetricName("mse")
+  // Print the metrics
+  def getMetrics(sample: DataFrame, sampleName: String, model:String):Unit={
+    val evaluatorRmse = new RegressionEvaluator()
+      .setLabelCol("label")
+      .setPredictionCol("prediction" + model)
+      .setMetricName("rmse")
+    val evaluatorR2 = new RegressionEvaluator()
+      .setLabelCol("label")
+      .setPredictionCol("prediction" + model)
+      .setMetricName("r2")
 
-  val evaluatorRmse = new RegressionEvaluator()
-    .setLabelCol("label")
-    .setPredictionCol("prediction")
-    .setMetricName("rmse")
+    val rmse = evaluatorRmse.evaluate(sample)
+    val r2 = evaluatorR2.evaluate(sample)
 
-  val evaluatorMae = new RegressionEvaluator()
-    .setLabelCol("label")
-    .setPredictionCol("prediction")
-    .setMetricName("mae")
+    println(sampleName + " - " + s"RMSE: ${rmse}" + " " + s"R2: ${r2}}")
+  }
 
-  val evaluatorr2 = new RegressionEvaluator()
-    .setLabelCol("label")
-    .setPredictionCol("prediction")
-    .setMetricName("r2")
+  /////////////////////////////////////////////////
+  ////////// RESULTS //////////////////////////////
+  /////////////////////////////////////////////////
 
-  val mse = evaluatorMse.evaluate(predictions)
-  println(s"Test MSE: ${mse}")
+  // TODO Print as dataframe
+  //Evaluate LR
+  getMetrics(trainPredictions, "Training", "Lr")
+  getMetrics(testPredictions, "Test", "Lr")
+  getMetrics(validationPredictions, "Validation", "Lr")
 
-  val rmse = evaluatorRmse.evaluate(predictions)
-  println(s"Test RMSE: ${rmse}")
-
-  val mae = evaluatorMae.evaluate(predictions)
-  println(s"Test MAE: ${mae}")
-
-  val r2 = evaluatorr2.evaluate(predictions)
-  println(s"Test R2: ${r2}")
+  //Evaluate RF
+  getMetrics(trainPredictions, "Training", "Rf")
+  getMetrics(testPredictions, "Test", "Rf")
+  getMetrics(validationPredictions, "Validation", "Rf")
 
 }
+
