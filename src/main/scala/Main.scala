@@ -93,6 +93,7 @@ object Main extends App{
       lit("2002")))
     .withColumn("Date", to_date($"DateString", "dd-MM-yyyy"))
     .withColumn("DayofYear", date_format($"Date", "D"))
+    .withColumn("DayofYear", ($"DayofYear" -1).cast(IntegerType))
     .drop("DayofMonth", "Year", "DateString", "Month")
 
   //Complete times
@@ -132,9 +133,9 @@ object Main extends App{
   //val dfCRSArrTimeEncoded = cyclicalEncodingTime(dfCRSDepTimeEncoded, "CRSArrTime")
 
   def cyclicalEncodingDate(dfIni: DataFrame, columnName:String) : DataFrame = {
-    val dfCyclical = (0 until 366).toList.toDF("Days")
+    val dfCyclical = (0 until 365).toList.toDF("Days")
       .withColumn("idNorm",
-        round(lit(2)*lit(Pi)*$"Days"/lit(365),6))
+        round(lit(2)*lit(Pi)*$"Days"/lit(364),6))
       .withColumn("x" + columnName, round(cos($"idNorm"),6))
       .withColumn("y" + columnName, round(sin($"idNorm"),6))
       .drop("idNorm")
@@ -283,5 +284,6 @@ object Main extends App{
     .withColumn("R-squared", round($"R-squared",3))
 
   println(results.show)
+
 }
 
