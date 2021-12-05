@@ -2,19 +2,27 @@ package es.upm.airplane
 import com.github.nscala_time.time.Imports._
 import org.apache.spark.ml.Pipeline
 import org.apache.spark.sql.expressions.Window
-import org.apache.spark.sql.{DataFrame, SparkSession}
+import org.apache.spark.sql.{AnalysisException, DataFrame, SparkSession}
 import org.apache.spark.sql.functions._
 import org.apache.spark.sql.types.{DoubleType, IntegerType, StringType, StructField, StructType}
 import org.apache.spark.ml.regression.{LinearRegression, RandomForestRegressor}
 import org.apache.spark.ml.feature.{Imputer, StandardScaler, VectorAssembler}
 import org.apache.spark.ml.evaluation.RegressionEvaluator
-
+import org.apache.log4j.{Level, Logger}
 import scala.math.Pi
 
 object Main extends App{
+  Logger.getLogger("org").setLevel(Level.WARN)
+
+  if (args.length == 0) {
+    println("Please introduce at least one parameter with the path file")
+    System.exit(0)
+  }
+  val filename = args(0)
+
   val spark = SparkSession.builder()
-    .master("local[1]")
-    .appName("Airlane Delay")
+    .master("local[*]")
+    .appName("Airplane Delay")
     .getOrCreate()
 
   import spark.implicits._
@@ -55,7 +63,18 @@ object Main extends App{
   ))
 
   // Read the data
-  val df = spark.read.option("header",true).option("delimiter", ",").schema(schema).csv("./data/2007.csv.bz2")
+  var df = spark.emptyDataFrame
+  try{
+    df = spark.read.option("header",true).option("delimiter", ",").option("enforceSchema", false).schema(schema).csv(filename)
+    df.head(1)
+  }catch {
+    case ex: AnalysisException =>
+      println(s"Path does not exist $filename")
+      System.exit(1)
+    case unknown: Exception =>
+      println("Schema mismatch")
+      System.exit(1)
+  }
 
   /////////////////////////////////////////////////
   ////////// INITIAL TRANSFORMATIONS //////////////
